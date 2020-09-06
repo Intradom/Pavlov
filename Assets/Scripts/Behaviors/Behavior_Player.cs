@@ -6,31 +6,22 @@ public class Behavior_Player : MonoBehaviour
 {
     enum Action
     {
-        Stay,
+        Coast,
+        Stop,
         Move_Right,
         Move_Left,
         Jump,
+        Jump_Left,
+        Jump_Right,
         Size
-    }
-
-    private struct Cluster_Data
-    {
-        public float hit_distance;
-        public int cluster_index;
-        
-        public Cluster_Data(float ht, int ci)
-        {
-            hit_distance = ht;
-            cluster_index = ci;
-        }
     }
 
     private struct Cluster_Point
     {
-        public List<Cluster_Data> cluster_data;
+        public Dictionary<int, float> cluster_data;
         public Action action;
 
-        public Cluster_Point(List<Cluster_Data> cd, Action a)
+        public Cluster_Point(Dictionary<int, float> cd, Action a)
         {
             cluster_data = cd;
             action = a;
@@ -53,46 +44,17 @@ public class Behavior_Player : MonoBehaviour
             }
         }
 
-        public float GetDistance(List<Cluster_Data> cluster_data, float invalid_value)
-        {
-            HashSet<int> used_indexes = new HashSet<int>();
-
-            float distance = 0f;
-            foreach(Cluster_Data cd in cluster_data)
-            {
-                float centroid_value = invalid_value;
-                if (centroid.ContainsKey(cd.cluster_index))
-                {
-                    centroid_value = centroid[cd.cluster_index];
-                }
-
-                distance += Mathf.Pow(centroid_value - cd.hit_distance, 2f);
-
-                used_indexes.Add(cd.cluster_index);
-            }
-
-            foreach(int cluster_index in centroid.Keys)
-            {
-                if (!used_indexes.Contains(cluster_index))
-                {
-                    distance += Mathf.Pow(invalid_value - centroid[cluster_index], 2f);
-                }
-            }
-
-            return Mathf.Sqrt(distance);
-        }
-
         public void Add(Cluster_Point point, float new_point_weight)
         {
-            foreach (Cluster_Data cd in point.cluster_data)
+            foreach (int cluster_index in point.cluster_data.Keys)
             {
-                if (centroid.ContainsKey(cd.cluster_index))
+                if (centroid.ContainsKey(cluster_index))
                 {
-                    centroid[cd.cluster_index] = (1f - new_point_weight) * centroid[cd.cluster_index] + new_point_weight * cd.hit_distance;
+                    centroid[cluster_index] = (1f - new_point_weight) * centroid[cluster_index] + new_point_weight * point.cluster_data[cluster_index];
                 }
                 else
                 {
-                    centroid.Add(cd.cluster_index, cd.hit_distance);
+                    centroid.Add(cluster_index, point.cluster_data[cluster_index]);
                 }
             }
 
@@ -129,6 +91,7 @@ public class Behavior_Player : MonoBehaviour
     [SerializeField] private float invalid_value = 1f;
     [SerializeField] private float new_point_weight = 0.1f; // clamp between [0f, 1f]
     [SerializeField] private float new_cluster_distance = 1f;
+    [SerializeField] private bool cluster_calibration = false;
 
     [Header("Random")]
     [SerializeField] private float random_action_base = 0.9f; // clamp between [0f, 1f]
@@ -138,16 +101,25 @@ public class Behavior_Player : MonoBehaviour
     [SerializeField] private CircleCollider2D ref_self_ground_check = null;
     [SerializeField] private LayerMask layer_mask_platform = 0;
     [SerializeField] private float action_update_seconds = 1f;
+    [SerializeField] private float input_action_thresh = 1f;
     [SerializeField] private float move_speed = 1f;
     [SerializeField] private float jump_vel = 1f;
 
     private Dictionary<string, int> tag_to_int = new Dictionary<string, int>();
     private List<Cluster> positive_clusters = new List<Cluster>();
     private List<Cluster> negative_clusters = new List<Cluster>();
-    private List<Cluster_Data> current_input = new List<Cluster_Data>();
-    private Action current_action = Action.Stay;
+    private Dictionary<int, float> current_input = new Dictionary<int, float>();
+    private Action current_action = Action.Coast;
+    private Vector3 position_respawn = Vector3.zero;
     private float last_action_update_time = 0f;
     private int total_cluster_points = 0;
+
+    public void Respawn()
+    {
+        ref_self_rbody.velocity = Vector2.zero;
+
+        transform.position = position_respawn;
+    }
 
     public void AddPositive()
     {
@@ -170,25 +142,35 @@ public class Behavior_Player : MonoBehaviour
 
         current_input = GatherRayInput();
         NewAction();
+
+        position_respawn = transform.position;
     }
 
     private void Update()
     {
+        Dictionary<int, float> past_input = current_input;
         current_input = GatherRayInput();
+        float distance = ClusterPointDistance(past_input, current_input);
 
         float e_time = Time.time - last_action_update_time;
-        if (e_time >= action_update_seconds)
+        if (e_time >= action_update_seconds || distance > input_action_thresh)
         {
             NewAction();
+
+            last_action_update_time = Time.time;
         }
     }
 
     private void FixedUpdate()
     {
+        bool grounded = Physics2D.OverlapCircle(ref_self_ground_check.transform.position, ref_self_ground_check.radius, layer_mask_platform);
         switch (current_action)
         {
-            case Action.Stay:
-                ref_self_rbody.velocity = Vector2.zero;
+            case Action.Coast:
+                // Do nothing
+                break;
+            case Action.Stop:
+                ref_self_rbody.velocity = new Vector2(0f, ref_self_rbody.velocity.y);
                 break;
             case Action.Move_Left:
                 ref_self_rbody.AddForce(Vector2.right * -move_speed * Time.fixedDeltaTime);
@@ -197,11 +179,39 @@ public class Behavior_Player : MonoBehaviour
                 ref_self_rbody.AddForce(Vector2.right * move_speed * Time.fixedDeltaTime); 
                 break;
             case Action.Jump:
-                if (Physics2D.OverlapCircle(ref_self_ground_check.transform.position, ref_self_ground_check.radius, layer_mask_platform))
+                if (grounded)
                 {
                     ref_self_rbody.AddForce(Vector2.up * jump_vel);
                 }
                 break;
+            case Action.Jump_Left:
+                if (grounded)
+                {
+                    ref_self_rbody.AddForce(Vector2.up * jump_vel);
+                }
+                ref_self_rbody.AddForce(Vector2.right * -move_speed * Time.fixedDeltaTime);
+                break;
+            case Action.Jump_Right:
+                if (grounded)
+                {
+                    ref_self_rbody.AddForce(Vector2.up * jump_vel);
+                }
+                ref_self_rbody.AddForce(Vector2.right * move_speed * Time.fixedDeltaTime);
+                break;
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collider)
+    {
+        if (collider.tag == "Checkpoint")
+        {
+            position_respawn = collider.transform.position;
+
+            Destroy(collider.gameObject);
+        }
+        else if (collider.tag == "Death")
+        {
+            Respawn();
         }
     }
 
@@ -217,9 +227,9 @@ public class Behavior_Player : MonoBehaviour
         return new_assignment;
     }
 
-    private List<Cluster_Data> GatherRayInput()
+    private Dictionary<int, float> GatherRayInput()
     {
-        List<Cluster_Data> ray_hit_dists = new List<Cluster_Data>();
+        Dictionary<int, float> ray_hit_dists = new Dictionary<int, float>();
 
         for (int i = 0; i < direction_check_rays; ++i)
         {
@@ -230,8 +240,8 @@ public class Behavior_Player : MonoBehaviour
             float hit_dist = hit ? hit.distance : max_ray_distance;
             if (hit)
             {
-                int cluster_index = GetTagAssignment(hit.transform.tag) * direction_check_rays;
-                ray_hit_dists.Add(new Cluster_Data(hit_dist, cluster_index));
+                int cluster_index = GetTagAssignment(hit.transform.tag) * direction_check_rays + i;
+                ray_hit_dists.Add(cluster_index, hit_dist);
             }
 
             if (draw_rays)
@@ -244,14 +254,46 @@ public class Behavior_Player : MonoBehaviour
         return ray_hit_dists;
     }
 
-    private Cluster FindClosestCluster(List<Cluster> clusters, List<Cluster_Data> input, bool create_new)
+    private float ClusterPointDistance(Dictionary<int, float> point_a, Dictionary<int, float> point_b)
+    {
+        HashSet<int> used_indexes = new HashSet<int>();
+
+        float distance = 0f;
+        foreach (int cluster_index in point_a.Keys)
+        {
+            float value = invalid_value;
+            if (point_b.ContainsKey(cluster_index))
+            {
+                value = point_b[cluster_index];
+            }
+            //Debug.Log("\t\t" + cd.cluster_index);
+
+            distance += Mathf.Pow(value - point_a[cluster_index], 2f);
+
+            used_indexes.Add(cluster_index);
+        }
+
+        //Debug.Log("\t\t---");
+        foreach (int cluster_index in point_b.Keys)
+        {
+            if (!used_indexes.Contains(cluster_index))
+            {
+                //Debug.Log("\t\t" + cluster_index);
+                distance += Mathf.Pow(invalid_value - point_b[cluster_index], 2f);
+            }
+        }
+
+        return Mathf.Sqrt(distance);
+    }
+
+    private Cluster FindClosestCluster(List<Cluster> clusters, Dictionary<int, float> input, bool create_new)
     {
         Cluster closest = null;
 
         float closest_distance = new_cluster_distance;
         foreach (Cluster c in clusters)
         {
-            float dist = c.GetDistance(input, invalid_value);
+            float dist = ClusterPointDistance(c.centroid, input);
             if (dist < closest_distance)
             {
                 closest_distance = dist;
@@ -261,7 +303,6 @@ public class Behavior_Player : MonoBehaviour
 
         if (create_new && closest == null)
         {
-            Debug.Log("New Cluster");
             closest = new Cluster();
             clusters.Add(closest);
         }
@@ -270,7 +311,7 @@ public class Behavior_Player : MonoBehaviour
 
     private Action DetermineAction(Cluster positive, Cluster negative)
     {
-        Action new_action = Action.Stay;
+        Action new_action = Action.Coast;
 
         float highest_action_value = -1f;
         for (int i = 0; i < (int)Action.Size; ++i)
@@ -290,22 +331,35 @@ public class Behavior_Player : MonoBehaviour
 
     private void NewAction()
     {
-        float random_action_thresh = Mathf.Pow(random_action_base, total_cluster_points);
-        if (Random.value <= random_action_thresh) // Pick random action
+        if (cluster_calibration)
         {
-            current_action = (Action)Random.Range(0, (int)Action.Size);
-            Debug.Log("Random: " + current_action);
+            Cluster closest = FindClosestCluster(positive_clusters, current_input, true);
+            closest.Add(new Cluster_Point(current_input, current_action), new_point_weight);
+            ++total_cluster_points;
 
+            Debug.Log("CLUSTER DISTANCES");
+            for (int i = 0; i < positive_clusters.Count; ++i)
+            {
+                Debug.Log("\t" + i + ": " + positive_clusters[i].point_count + ", " + ClusterPointDistance(positive_clusters[i].centroid, current_input));
+            }
         }
-        else // Pick example action
+        else
         {
-            Cluster cp = FindClosestCluster(positive_clusters, current_input, false);
-            Cluster cn = FindClosestCluster(negative_clusters, current_input, false);
+            float random_action_thresh = Mathf.Pow(random_action_base, total_cluster_points);
+            if (Random.value <= random_action_thresh) // Pick random action
+            {
+                current_action = (Action)Random.Range(0, (int)Action.Size);
+                Debug.Log("Random: " + current_action);
 
-            current_action = DetermineAction(cp, cn);
-            Debug.Log("Cluster: " + current_action);
+            }
+            else // Pick example action
+            {
+                Cluster cp = FindClosestCluster(positive_clusters, current_input, false);
+                Cluster cn = FindClosestCluster(negative_clusters, current_input, false);
+
+                current_action = DetermineAction(cp, cn);
+                Debug.Log("Cluster: " + current_action);
+            }
         }
-
-        last_action_update_time = Time.time;
     }
 }
