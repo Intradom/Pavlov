@@ -102,6 +102,7 @@ public class Behavior_Player : MonoBehaviour
     [SerializeField] private LayerMask layer_mask_platform = 0;
     [SerializeField] private float action_update_seconds = 1f;
     [SerializeField] private float input_action_thresh = 1f;
+    [SerializeField] private int action_buffer_size = 1;
     [SerializeField] private float move_speed = 1f;
     [SerializeField] private float jump_vel = 1f;
 
@@ -109,6 +110,7 @@ public class Behavior_Player : MonoBehaviour
     private List<Cluster> positive_clusters = new List<Cluster>();
     private List<Cluster> negative_clusters = new List<Cluster>();
     private Dictionary<int, float> current_input = new Dictionary<int, float>();
+    private Queue<Cluster_Point> state_buffer = new Queue<Cluster_Point>();
     private Action current_action = Action.Coast;
     private Vector3 position_respawn = Vector3.zero;
     private float last_action_update_time = 0f;
@@ -123,16 +125,22 @@ public class Behavior_Player : MonoBehaviour
 
     public void AddPositive()
     {
-        Cluster closest = FindClosestCluster(positive_clusters, current_input, true);
-        closest.Add(new Cluster_Point(current_input, current_action), new_point_weight);
-        ++total_cluster_points;
+        foreach (Cluster_Point cp in state_buffer)
+        {
+            Cluster closest = FindClosestCluster(positive_clusters, current_input, true);
+            closest.Add(cp, new_point_weight);
+            ++total_cluster_points;
+        }
     }
 
     public void AddNegative()
     {
-        Cluster closest = FindClosestCluster(negative_clusters, current_input, true);
-        closest.Add(new Cluster_Point(current_input, current_action), new_point_weight);
-        ++total_cluster_points;
+        foreach (Cluster_Point cp in state_buffer)
+        {
+            Cluster closest = FindClosestCluster(negative_clusters, current_input, true);
+            closest.Add(cp, new_point_weight);
+            ++total_cluster_points;
+        }
     }
 
     private void Start()
@@ -156,6 +164,12 @@ public class Behavior_Player : MonoBehaviour
         if (e_time >= action_update_seconds || distance > input_action_thresh)
         {
             NewAction();
+
+            state_buffer.Enqueue(new Cluster_Point(current_input, current_action));
+            if (state_buffer.Count > action_buffer_size)
+            {
+                state_buffer.Dequeue();
+            }
 
             last_action_update_time = Time.time;
         }
@@ -313,15 +327,38 @@ public class Behavior_Player : MonoBehaviour
     {
         Action new_action = Action.Coast;
 
-        float highest_action_value = -1f;
+        /*
+        float cumulative_chance = 0f;
+        List<float> action_chances = new List<float>();
         for (int i = 0; i < (int)Action.Size; ++i)
         {
             float positive_strength = (positive == null) ? 0f : positive.action_strengths[i];
             float negative_strength = (negative == null) ? 0f : -negative.action_strengths[i];
             float action_strength = positive_strength + negative_strength;
-            if (action_strength > highest_action_value)
+            cumulative_chance += action_strength;
+            action_chances.Add(cumulative_chance);
+        }
+
+        float rand = Random.value * cumulative_chance;
+        int index = action_chances.BinarySearch(rand);
+        if (index < 0)
+        {
+            index = ~index - 1;
+        }
+        if (index >= 0 && index < (int)Action.Size)
+        {
+            new_action = (Action)index;
+        }
+        */
+        float highest_strength = -1f;
+        for (int i = 0; i < (int)Action.Size; ++i)
+        {
+            float positive_strength = (positive == null) ? 0f : positive.action_strengths[i];
+            float negative_strength = (negative == null) ? 0f : -negative.action_strengths[i];
+            float action_strength = positive_strength + negative_strength;
+            if (action_strength > highest_strength)
             {
-                highest_action_value = action_strength;
+                highest_strength = action_strength;
                 new_action = (Action)i;
             }
         }

@@ -1253,10 +1253,11 @@ MonoBehaviour:
   layer_mask_platform:
     serializedVersion: 2
     m_Bits: 256
-  action_update_seconds: 5
-  input_action_thresh: 1
+  action_update_seconds: 1
+  input_action_thresh: 5
+  action_buffer_size: 1
   move_speed: 250
-  jump_vel: 200
+  jump_vel: 150
 --- !u!1001 &1447606135
 PrefabInstance:
   m_ObjectHideFlags: 0
