@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
-  m_IndirectSpecularColor: {r: 0.20749143, g: 0.21147497, b: 0.14576834, a: 1}
+  m_IndirectSpecularColor: {r: 0.20749113, g: 0.21147475, b: 0.14576823, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -1241,7 +1241,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ref_transform_eyes: {fileID: 1538742681}
   direction_check_rays: 16
-  max_ray_distance: 10
+  max_ray_distance: 5
   draw_rays: 1
   invalid_value: 1000
   new_point_weight: 0.1
@@ -1255,7 +1255,7 @@ MonoBehaviour:
     m_Bits: 256
   action_update_seconds: 1
   input_action_thresh: 5
-  action_buffer_size: 1
+  action_buffer_size: 3
   move_speed: 250
   jump_vel: 150
 --- !u!1001 &1447606135

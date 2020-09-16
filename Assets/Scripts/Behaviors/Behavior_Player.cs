@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEditor;
 
 public class Behavior_Player : MonoBehaviour
 {
@@ -41,6 +42,16 @@ public class Behavior_Player : MonoBehaviour
             for (int i = 0; i < action_size; ++i)
             {
                 action_strengths[i] = 1f / action_size;
+            }
+        }
+
+        public Cluster(Cluster model)
+        {
+            int action_size = (int)Action.Size;
+            action_strengths = new float[action_size];
+            for (int i = 0; i < action_size; ++i)
+            {
+                action_strengths[i] = model.action_strengths[i];
             }
         }
 
@@ -115,6 +126,10 @@ public class Behavior_Player : MonoBehaviour
     private Vector3 position_respawn = Vector3.zero;
     private float last_action_update_time = 0f;
     private int total_cluster_points = 0;
+    private bool facing_right = true;
+
+    // Debug
+    private float[] debug_action_likelihoods = new float[(int)Action.Size];
 
     public void Respawn()
     {
@@ -188,9 +203,11 @@ public class Behavior_Player : MonoBehaviour
                 break;
             case Action.Move_Left:
                 ref_self_rbody.AddForce(Vector2.right * -move_speed * Time.fixedDeltaTime);
+                Flip(false);
                 break;
             case Action.Move_Right:
-                ref_self_rbody.AddForce(Vector2.right * move_speed * Time.fixedDeltaTime); 
+                ref_self_rbody.AddForce(Vector2.right * move_speed * Time.fixedDeltaTime);
+                Flip(true);
                 break;
             case Action.Jump:
                 if (grounded)
@@ -204,6 +221,7 @@ public class Behavior_Player : MonoBehaviour
                     ref_self_rbody.AddForce(Vector2.up * jump_vel);
                 }
                 ref_self_rbody.AddForce(Vector2.right * -move_speed * Time.fixedDeltaTime);
+                Flip(false);
                 break;
             case Action.Jump_Right:
                 if (grounded)
@@ -211,6 +229,7 @@ public class Behavior_Player : MonoBehaviour
                     ref_self_rbody.AddForce(Vector2.up * jump_vel);
                 }
                 ref_self_rbody.AddForce(Vector2.right * move_speed * Time.fixedDeltaTime);
+                Flip(true);
                 break;
         }
     }
@@ -227,6 +246,32 @@ public class Behavior_Player : MonoBehaviour
         {
             Respawn();
         }
+    }
+
+    private void OnDrawGizmos()
+    {
+        /*
+        if (!Application.isEditor)
+        {
+            return;
+        }
+        */
+
+        Vector3 display_loc = Camera.main.ScreenToWorldPoint(new Vector3(0f, Screen.height * 0.95f));
+
+        string debug_text = "";
+
+        debug_text += "Positive Clusters: " + positive_clusters.Count + "\n";
+        debug_text += "Negative Clusters: " + negative_clusters.Count + "\n\n";
+
+        for (int i = 0; i < (int)Action.Size; ++i)
+        {
+            debug_text += ((Action)i).ToString() + ": " + debug_action_likelihoods[i] +"\n";
+        }
+        GUIStyle style = new GUIStyle();
+        style.alignment = TextAnchor.UpperLeft;
+        style.normal.textColor = Color.white;
+        Handles.Label(display_loc, debug_text, style);
     }
 
     private int GetTagAssignment(string tag)
@@ -304,22 +349,31 @@ public class Behavior_Player : MonoBehaviour
     {
         Cluster closest = null;
 
-        float closest_distance = new_cluster_distance;
+        float closest_distance = -1f;
         foreach (Cluster c in clusters)
         {
             float dist = ClusterPointDistance(c.centroid, input);
-            if (dist < closest_distance)
+            if (closest_distance < 0f || dist < closest_distance)
             {
                 closest_distance = dist;
                 closest = c;
             }
         }
 
-        if (create_new && closest == null)
+        if (create_new)
         {
-            closest = new Cluster();
-            clusters.Add(closest);
+            if (closest == null)  // No clusters to compare against
+            {
+                closest = new Cluster();
+                clusters.Add(closest);
+            }
+            else if (closest_distance >= new_cluster_distance) // Existing clusters too far, create new one influened by nearest
+            {
+                closest = new Cluster(closest);
+                clusters.Add(closest);
+            }
         }
+
         return closest;
     }
 
@@ -356,6 +410,7 @@ public class Behavior_Player : MonoBehaviour
             float positive_strength = (positive == null) ? 0f : positive.action_strengths[i];
             float negative_strength = (negative == null) ? 0f : -negative.action_strengths[i];
             float action_strength = positive_strength + negative_strength;
+            debug_action_likelihoods[i] = action_strength;
             if (action_strength > highest_strength)
             {
                 highest_strength = action_strength;
@@ -398,5 +453,16 @@ public class Behavior_Player : MonoBehaviour
                 Debug.Log("Cluster: " + current_action);
             }
         }
+    }
+
+    private void Flip(bool should_face_right)
+    {
+        /*
+        if ((facing_right && !should_face_right) || (!facing_right && should_face_right))
+        {
+            transform.localScale = new Vector3(transform.localScale.x * -1, transform.localScale.y, transform.localScale.z);
+            facing_right = !facing_right;
+        }
+        */
     }
 }
